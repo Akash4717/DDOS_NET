@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>AI DDoS Detector — Console</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root{
+      --bg:#070814;--line:rgba(255,255,255,0.06);--txt:#e8edff;--muted:#9fb0ff;--bad:#ff5b6e;--good:#3ee98a;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Inter,Arial; color:var(--txt); background: radial-gradient(circle at 20% 10%, #0c1130,#070a1e); padding:18px}
+    .container{max-width:1200px;margin:0 auto}
+    .header{display:flex; justify-content:space-between; align-items:center; margin-bottom:18px}
+    .card{background:rgba(255,255,255,0.03); border:1px solid var(--line); padding:14px; border-radius:12px}
+    .stats{display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:14px}
+    .big{font-size:28px; font-weight:800}
+    .controls{display:flex; gap:8px; margin-bottom:14px}
+    .btn{padding:8px 12px; border-radius:10px; border:1px solid var(--line); cursor:pointer; background:transparent;color:var(--txt)}
+    .btn-red{border-color:rgba(255,91,110,.45)}
+    .btn-green{border-color:rgba(62,233,138,.45)}
+    .panels{display:grid; grid-template-columns:1fr 420px; gap:12px}
+    .panel{padding:12px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
+    .ip-tag{display:inline-block;padding:6px 10px;border-radius:8px;margin:4px;background:rgba(255,91,110,.08);color:var(--bad);border:1px solid rgba(255,91,110,.18)}
+    .small{font-size:12px;color:var(--muted)}
+    .right{display:flex;gap:8px;align-items:center}
+    .muted{color:var(--muted)}
+    .table-scroll{max-height:220px; overflow:auto}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <h2>AI DDoS Detector — Console</h2>
+        <div class="small muted">Live telemetry • Active IPs • Blacklist</div>
+      </div>
+      <div class="right">
+        <div class="card small muted" style="padding:8px 12px">Model: <span id="model-accuracy">—</span></div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="card">
+        <div class="small muted">Status</div>
+        <div class="big" id="status">Normal</div>
+      </div>
+      <div class="card">
+        <div class="small muted">Packets / Sec</div>
+        <div class="big" id="packets-per-sec">0</div>
+      </div>
+      <div class="card">
+        <div class="small muted">Unique IPs</div>
+        <div class="big" id="unique-ips">0</div>
+      </div>
+      <div class="card">
+        <div class="small muted">Confidence</div>
+        <div class="big" id="confidence">0%</div>
+      </div>
+      <div class="card">
+        <div class="small muted">Alerts</div>
+        <div class="big" id="alerts">0</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn btn-green" onclick="refreshStats()">Refresh</button>
+      <button class="btn btn-red" onclick="resetStats()">Reset</button>
+      <button class="btn btn-green" onclick="mitigateNow()">Mitigate (current malicious)</button>
+      <button class="btn" onclick="clearBlacklist()">Clear Blacklist</button>
+    </div>
+
+    <div class="panels">
+      <!-- Left: Traffic + Active IPs + Logs -->
+      <div>
+        <div class="card panel">
+          <h4>Real-Time Traffic</h4>
+          <canvas id="trafficChart" style="height:160px"></canvas>
+        </div>
+
+        <div class="card panel" style="margin-top:12px">
+          <h4>Active Source IPs (last 10s)</h4>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>IP Address</th><th>Requests</th></tr></thead>
+              <tbody id="active-ips">
+                <tr><td colspan="2" class="muted">No traffic yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card panel" style="margin-top:12px">
+          <h4>Security Event Log</h4>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Time</th><th>Type</th><th>Confidence</th><th>PPS + IPs</th></tr></thead>
+              <tbody id="attack-log"><tr><td colspan="4" class="muted">No events</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Detection + Malicious + Blacklist -->
+      <div>
+        <div class="card panel">
+          <h4>Detection Overview</h4>
+          <canvas id="detectionChart" style="height:180px"></canvas>
+        </div>
+
+        <div class="card panel" style="margin-top:12px">
+          <h4>Flagged Malicious IPs (current)</h4>
+          <div id="malicious-ips" style="margin-top:8px">
+            <div class="muted">No malicious IPs detected</div>
+          </div>
+        </div>
+
+        <div class="card panel" style="margin-top:12px">
+          <h4>Blacklisted IPs (mitigated)</h4>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>IP</th><th>Since</th><th>Reason</th><th>Action</th></tr></thead>
+              <tbody id="blacklist-body"><tr><td colspan="4" class="muted">No blacklisted IPs</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+  // Charts
+  const trafficCtx = document.getElementById('trafficChart').getContext('2d');
+  const trafficChart = new Chart(trafficCtx, {
+    type: 'line',
+    data: {labels: [], datasets: [{ label: 'PPS', data: [], tension: .3, fill:true }]},
+    options: { animation:{duration:200}, scales:{y:{beginAtZero:true}} }
+  });
+
+  const detectionCtx = document.getElementById('detectionChart').getContext('2d');
+  const detectionChart = new Chart(detectionCtx, {
+    type: 'doughnut',
+    data: { labels: ['Normal','Attack'], datasets:[{ data:[100,0], backgroundColor:['#3ee98a','#ff5b6e'] }]},
+    options: { cutout:'70%' }
+  });
+
+  // Helpers
+  function el(id){return document.getElementById(id)}
+  function fmt(n){ return Number(n||0).toLocaleString() }
+
+  async function updateDashboard(){
+    try{
+      const r = await fetch('/api/stats');
+      const data = await r.json();
+      const cur = data.current || {};
+
+      el('status').textContent = (cur.status && cur.status !== 'Normal') ? `${cur.status} (${(cur.malicious_ips||[]).length} IPs)` : 'Normal';
+      el('packets-per-sec').textContent = fmt(Math.round(cur.packets_per_sec||0));
+      el('unique-ips').textContent = fmt(cur.unique_src_ips||0);
+      el('confidence').textContent = (cur.confidence||0).toFixed(1) + '%';
+      el('alerts').textContent = fmt(cur.alerts||0);
+      el('model-accuracy').textContent = (data.model_accuracy||0).toFixed(1) + '%';
+
+      // Active IPs table
+      const active = data.active_ips || [];
+      const activeBody = el('active-ips');
+      if(!active.length){
+        activeBody.innerHTML = `<tr><td colspan="2" class="muted">No traffic yet</td></tr>`;
+      } else {
+        activeBody.innerHTML = active.map(a=>`<tr><td>${a.ip}</td><td>${a.count}</td></tr>`).join('');
+      }
+
+      // Malicious IPs (current)
+      const malicious = cur.malicious_ips || [];
+      const malBox = el('malicious-ips');
+      if(!malicious.length){
+        malBox.innerHTML = `<div class="muted">No malicious IPs detected</div>`;
+      } else {
+        malBox.innerHTML = malicious.map(ip=>`<span class="ip-tag">${ip}</span>`).join('');
+      }
+
+      // Blacklist table
+      const black = data.blacklisted_ips || [];
+      const blBody = el('blacklist-body');
+      if(!black.length){
+        blBody.innerHTML = `<tr><td colspan="4" class="muted">No blacklisted IPs</td></tr>`;
+      } else {
+        blBody.innerHTML = black.map(b=>{
+          return `<tr>
+            <td>${b.ip}</td>
+            <td>${b.since}</td>
+            <td>${b.reason||'mitigated'}</td>
+            <td><button class="btn" onclick="unblockIp('${b.ip}')">Unblock</button></td>
+          </tr>`;
+        }).join('');
+      }
+
+      // Charts
+      const T = data.traffic_history || [];
+      trafficChart.data.labels = T.map(()=> '');
+      trafficChart.data.datasets[0].data = T;
+      trafficChart.update();
+
+      const D = data.detection_history || [];
+      const normalCount = D.filter(x=>!x.is_attack).length;
+      const attackCount = D.filter(x=>x.is_attack).length;
+      detectionChart.data.datasets[0].data = [normalCount, attackCount];
+      detectionChart.update();
+
+    } catch(err){
+      console.error("Update failed", err);
+    }
+  }
+
+  function refreshStats(){ updateDashboard(); }
+  async function resetStats(){
+    if(!confirm('Reset statistics and clear blacklist?')) return;
+    await fetch('/api/reset', {method:'POST'});
+    updateDashboard();
+  }
+
+  async function mitigateNow(){
+    if(!confirm('Mitigate current malicious IPs (move to blacklist)?')) return;
+    try{
+      const res = await fetch('/api/trigger_mitigation', {
+        method:'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action:'mitigate'})
+      });
+      const data = await res.json();
+      if(data.ok || data.blacklisted){
+        alert('Mitigation executed. Blacklisted: ' + (data.blacklisted||[]).join(', '));
+      }
+    } catch(e){ console.error(e); alert('Mitigation failed'); }
+    updateDashboard();
+  }
+
+  async function clearBlacklist(){
+    if(!confirm('Clear entire blacklist?')) return;
+    await fetch('/api/trigger_mitigation', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'clear_blacklist'})
+    });
+    updateDashboard();
+  }
+
+  async function unblockIp(ip){
+    if(!confirm(`Unblock ${ip}?`)) return;
+    await fetch('/api/trigger_mitigation', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'unblock', ip: ip})
+    });
+    updateDashboard();
+  }
+
+  // initial + periodic refresh
+  updateDashboard();
+  setInterval(updateDashboard, 2000);
+</script>
+</body>
+</html>

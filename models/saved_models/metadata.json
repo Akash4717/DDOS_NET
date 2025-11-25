@@ -1,0 +1,22 @@
+{
+  "training_date": "2025-11-09T18:25:42.576172",
+  "n_samples": 50000,
+  "n_features": 12,
+  "rf_accuracy": 1.0,
+  "iso_accuracy": 0.9991333333333333,
+  "ensemble_accuracy": 0.9998,
+  "feature_names": [
+    "packets_per_sec",
+    "bytes_per_sec",
+    "unique_src_ips",
+    "unique_dst_ports",
+    "avg_packet_size",
+    "packet_size_variance",
+    "flow_duration",
+    "syn_count",
+    "rst_count",
+    "ack_count",
+    "connection_rate",
+    "src_ip_entropy"
+  ]
+}

@@ -1,0 +1,1 @@
+["packets_per_sec", "bytes_per_sec", "unique_src_ips", "unique_dst_ports", "avg_packet_size", "packet_size_variance", "flow_duration", "syn_count", "rst_count", "ack_count", "connection_rate", "src_ip_entropy"]

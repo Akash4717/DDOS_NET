@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Victim Node — Live System</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+    body {
+        margin: 0;
+        background: #05060a;
+        color: #d1e0ff;
+        font-family: "Share Tech Mono", monospace;
+        overflow: hidden;
+    }
+
+    /* Floating cyber grid */
+    .grid {
+        position: absolute;
+        width: 200%;
+        height: 200%;
+        background: url('https://i.imgur.com/7dPm7mM.png');
+        background-size: cover;
+        opacity: 0.07;
+        animation: drift 40s linear infinite;
+    }
+    @keyframes drift {
+        0% { transform: translate(0,0); }
+        100% { transform: translate(-50%,-50%); }
+    }
+
+    /* Center terminal box */
+    .terminal {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 760px;
+        max-width: 90vw;
+        background: rgba(10, 14, 22, 0.65);
+        border: 1px solid rgba(120,180,255,0.2);
+        backdrop-filter: blur(14px);
+        border-radius: 10px;
+        padding: 24px;
+        box-shadow: 0 0 40px rgba(0, 150, 255, .25);
+    }
+
+    .title {
+        font-size: 26px;
+        margin-bottom: 12px;
+        color: #59ffb9;
+        text-shadow: 0 0 12px #59ffb9;
+        font-weight: bold;
+        letter-spacing: 2px;
+    }
+
+    .sub {
+        font-size: 14px;
+        color: #89a3d8;
+        margin-bottom: 20px;
+    }
+
+    /* Node animation canvas */
+    canvas {
+        position: absolute;
+        top:0;
+        left:0;
+        width:100%;
+        height:100%;
+        pointer-events:none;
+        opacity:0.6;
+    }
+
+    .blink {
+        animation: blink 1.2s infinite;
+    }
+    @keyframes blink {
+        50% { opacity: .2; }
+    }
+</style>
+</head>
+<body>
+
+<div class="grid"></div>
+<canvas id="net"></canvas>
+
+<div class="terminal">
+    <div class="title">VICTIM SYSTEM ONLINE</div>
+    <div class="sub">Awaiting incoming network traffic...</div>
+
+    <p>>> This system is currently acting as the *target node* in the network.</p>
+    <p>>> No defense is executed here. No analysis is running locally.</p>
+    <p>>> All traffic is being **generated externally** and will be **observed by the Detection Server**.</p>
+
+    <br>
+    <p class="blink">[ STANDING BY . . . ]</p>
+</div>
+
+<script>
+/* Node-Network Visualization */
+const canvas = document.getElementById("net"),
+      ctx = canvas.getContext("2d");
+canvas.width = innerWidth;
+canvas.height = innerHeight;
+
+let nodes = [];
+for(let i=0;i<90;i++){
+    nodes.push({
+        x: Math.random()*canvas.width,
+        y: Math.random()*canvas.height,
+        vx:(Math.random()-0.5)*0.4,
+        vy:(Math.random()-0.5)*0.4
+    });
+}
+
+function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    for(let i=0;i<nodes.length;i++){
+        let n = nodes[i];
+        n.x+=n.vx; n.y+=n.vy;
+
+        if(n.x<0||n.x>canvas.width) n.vx*=-1;
+        if(n.y<0||n.y>canvas.height) n.vy*=-1;
+
+        ctx.fillStyle="#59ffb9";
+        ctx.beginPath();
+        ctx.arc(n.x,n.y,2,0,Math.PI*2);
+        ctx.fill();
+
+        for(let j=i+1;j<nodes.length;j++){
+            let m = nodes[j],
+                dx=n.x-m.x,
+                dy=n.y-m.y,
+                dist = dx*dx+dy*dy;
+            if(dist<12000){
+                ctx.strokeStyle="rgba(89,255,185,0.12)";
+                ctx.lineWidth=1;
+                ctx.beginPath();
+                ctx.moveTo(n.x,n.y);
+                ctx.lineTo(m.x,m.y);
+                ctx.stroke();
+            }
+        }
+    }
+    requestAnimationFrame(draw);
+}
+draw();
+</script>
+</body>
+</html>
