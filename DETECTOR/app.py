@@ -10,43 +10,22 @@ import threading
 import json
 
 # -----------------------------
-# EmailJS Configuration (YOUR VALUES)
+# EmailJS Configuration
 # -----------------------------
-EMAILJS_SERVICE_ID = "service_99rn43g"
-EMAILJS_TEMPLATE_ID = "template_4atsdzr"
-EMAILJS_PUBLIC_KEY = "1HCnPuklMltcd3-I_"
-EMAILJS_PRIVATE_KEY = "L37XzDr-iJ36dAuyfrTIm"
+EMAILJS_SERVICE_ID = "service_wawooy6"
+EMAILJS_TEMPLATE_ID = "template_4cvg4tr"
+EMAILJS_PUBLIC_KEY = "1Uk51k97xnllFFRr5"
+EMAILJS_PRIVATE_KEY = "CMLaeyW5Xkh15xSEbgBEq"
 EMAILJS_URL = "https://api.emailjs.com/api/v1.0/email/send"
-ADMIN_EMAIL = "akash.1si22ad001@gmail.com"
-
-
-# -----------------------------
-# Email Send Function (STRICT MODE FINAL WORKING)
-# -----------------------------
-def send_attack_email(attack_type, confidence, ips, timestamp):
-    payload = {
-        "service_id": EMAILJS_SERVICE_ID,
-        "template_id": EMAILJS_TEMPLATE_ID,
-        "user_id": EMAILJS_PUBLIC_KEY,       # MUST be public key
-        "accessToken": EMAILJS_PRIVATE_KEY,  # MUST be private key
-        "template_params": {
-            "admin_email": ADMIN_EMAIL,
-            "attack_type": attack_type,
-            "confidence": f"{confidence:.1f}%",
-            "malicious_ips": ", ".join(ips) if ips else "Unknown",
-            "timestamp": timestamp
-        }
-    }
-
-    try:
-        response = requests.post(EMAILJS_URL, json=payload, timeout=5)
-        print("[EMAIL RAW]:", response.status_code, response.text)
-    except Exception as e:
-        print("[EMAIL ERROR]", e)
-
+ADMIN_EMAIL = "gauhith.1si22ad016@gmail.com"
 
 # -----------------------------
-# Logging / Flask Setup
+# Victim Firewall Endpoint
+# -----------------------------
+VICTIM_BLOCK_URL = "http://localhost:8000/api/block_ip"
+
+# -----------------------------
+# Logging Setup
 # -----------------------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [DETECTOR] %(message)s")
 log = logging.getLogger("detector")
@@ -55,9 +34,8 @@ app = Flask(__name__, template_folder="templates")
 CORS(app)
 
 # -----------------------------
-# System Runtime State
+# Runtime State
 # -----------------------------
-VICTIM_BLOCK_URL = "http://localhost:8000/api/block_ip"
 ACTIVE_IP_WINDOW_SEC = 10
 MAX_HISTORY = 200
 
@@ -82,10 +60,31 @@ _active_lock = threading.Lock()
 _blacklisted = {}
 _blacklist_lock = threading.Lock()
 
-
 # -----------------------------
 # Helper Functions
 # -----------------------------
+def send_attack_email(attack_type, confidence, ips, timestamp):
+    payload = {
+        "service_id": EMAILJS_SERVICE_ID,
+        "template_id": EMAILJS_TEMPLATE_ID,
+        "user_id": EMAILJS_PUBLIC_KEY,
+        "accessToken": EMAILJS_PRIVATE_KEY,
+        "template_params": {
+            "admin_email": ADMIN_EMAIL,
+            "attack_type": attack_type,
+            "confidence": f"{confidence:.1f}%",
+            "malicious_ips": ", ".join(ips) if ips else "Unknown",
+            "timestamp": timestamp
+        }
+    }
+
+    try:
+        response = requests.post(EMAILJS_URL, json=payload, timeout=5)
+        print("[EMAIL RAW]:", response.status_code, response.text)
+    except Exception as e:
+        print("[EMAIL ERROR]", e)
+
+
 def to_number(v):
     if isinstance(v, (np.float32, np.float64)): return float(v)
     if isinstance(v, (np.int32, np.int64)): return int(v)
@@ -95,26 +94,32 @@ def safe(data, key, default=0.0):
     try: return float(data.get(key, default))
     except: return float(default)
 
-def record_active_ips(ips):
-    ts = time.time()
-    with _active_lock:
-        _active_ip_events.append((ts, ips))
-        cutoff = ts - ACTIVE_IP_WINDOW_SEC
-        while _active_ip_events and _active_ip_events[0][0] < cutoff:
-            _active_ip_events.popleft()
+# -----------------------------
+# Mitigation Function
+# -----------------------------
+def block_ip(ip):
+    try:
+        with _blacklist_lock:
+            if ip in _blacklisted:
+                return False
 
-def get_active_ips():
-    cutoff = time.time() - ACTIVE_IP_WINDOW_SEC
-    counts = defaultdict(int)
+            response = requests.post(VICTIM_BLOCK_URL, json={"ip": ip}, timeout=5)
 
-    with _active_lock:
-        for ts, iplist in _active_ip_events:
-            if ts >= cutoff:
-                for ip in iplist:
-                    counts[ip] += 1
+            if response.status_code == 200:
+                _blacklisted[ip] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                log.warning(f"[MITIGATION] Blocked IP: {ip}")
+                return True
 
-    return sorted(counts.items(), key=lambda x: -x[1])
+            log.error(f"[MITIGATION ERROR] Victim refused block: {response.text}")
+            return False
+    except Exception as e:
+        log.error(f"[MITIGATION ERROR] Failed blocking {ip} -> {str(e)}")
+        return False
 
+
+def auto_mitigate(ips):
+    for ip in ips:
+        block_ip(ip)
 
 # -----------------------------
 # Detection Logic
@@ -177,8 +182,13 @@ def ingest():
         if is_attack:
             attack_log.append(detection_history[-1])
             current_stats["alerts"] += 1
+
             log.warning(f"[DETECT] {atk_type} | {conf:.1f}% | IPs={bad_ips}")
+
             send_attack_email(atk_type, conf, bad_ips, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+            # AUTO MITIGATION HERE
+            auto_mitigate(bad_ips)
 
         return jsonify({"detected": is_attack, "attack_type": atk_type, "confidence": conf, "malicious_ips": bad_ips})
 
@@ -187,16 +197,34 @@ def ingest():
 
 
 # -----------------------------
-# API: Manual Test Email Button
+# Manual Mitigation Endpoint
 # -----------------------------
-@app.route("/api/send_alert", methods=["POST"])
-def manual_alert():
-    send_attack_email("Manual Trigger", 100, ["N/A"], datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    return jsonify({"ok": True, "message": "Email sent"})
+@app.route("/api/mitigate", methods=["POST"])
+def trigger_mitigation():
+    ips = current_stats.get("malicious_ips", [])
+
+    if not ips:
+        return jsonify({"ok": False, "message": "No malicious IPs detected."}), 400
+
+    blocked = []
+    already = []
+
+    for ip in ips:
+        if ip in _blacklisted:
+            already.append(ip)
+        elif block_ip(ip):
+            blocked.append(ip)
+
+    return jsonify({
+        "ok": True,
+        "blocked": blocked,
+        "already_blocked": already,
+        "total_blacklisted": list(_blacklisted.keys())
+    })
 
 
 # -----------------------------
-# API: Stats for Dashboard
+# Stats Endpoint
 # -----------------------------
 @app.route("/api/stats")
 def stats():
@@ -205,19 +233,19 @@ def stats():
         "traffic_history": list(traffic_history),
         "detection_history": list(detection_history),
         "attack_log": list(attack_log),
-        "active_ips": [{"ip": ip, "count": cnt} for ip, cnt in get_active_ips()],
-        "blacklisted_ips": []
+        "blacklisted_ips": [{"ip": ip, "blocked_at": ts} for ip, ts in _blacklisted.items()]
     })
 
 
 # -----------------------------
-# API: RESET Button
+# Reset
 # -----------------------------
 @app.route("/api/reset", methods=["POST"])
 def reset_system():
     traffic_history.clear()
     detection_history.clear()
     attack_log.clear()
+    _blacklisted.clear()
 
     current_stats.update({
         "packets_per_sec": 0,
@@ -230,24 +258,15 @@ def reset_system():
         "malicious_ips": []
     })
 
-    with _active_lock:
-        _active_ip_events.clear()
-
-    log.info("[RESET] System reset from dashboard")
+    log.info("[RESET] System reset")
     return jsonify({"reset": True})
 
 
-# -----------------------------
-# UI Route
-# -----------------------------
 @app.route("/")
 def index():
     return render_template("dashboard.html")
 
 
-# -----------------------------
-# Run Server
-# -----------------------------
 if __name__ == "__main__":
-    log.info("[START] Detector listening on :5000")
+    log.info("[START] Detector Running on :5000")
     app.run(host="0.0.0.0", port=5000, debug=True)
